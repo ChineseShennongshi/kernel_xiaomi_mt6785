@@ -17,7 +17,7 @@ jobs:
   Set-repos:
     name: "🐂 Parse repos.json"
     runs-on: ubuntu-latest
-    if: github.repository_owner == 'Nova-Kernels' && github.repository == 'Nova-Kernels/priv_kernel_xiaomi_mt6785'
+    if: github.repository == 'ChineseShennongshi/kernel_xiaomi_mt6785'
     outputs:
       repos: ${{ steps.generate-matrix.outputs.repos }}
       builddate: ${{ steps.generate-builddate.outputs.builddate }}
@@ -38,7 +38,7 @@ jobs:
   Build-Kernel:
     name: "🐎 Build kernel"
     runs-on: ubuntu-latest
-    if: github.repository_owner == 'Nova-Kernels' && github.repository == 'Nova-Kernels/priv_kernel_xiaomi_mt6785'
+    if: github.repository == 'ChineseShennongshi/kernel_xiaomi_mt6785'
     needs:
       - Set-repos
     strategy:
@@ -125,9 +125,8 @@ jobs:
 
       - name: "🌟 Clone kernel source => (${{ env.KERNEL_REPO }})"
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone --recursive --depth=1 -j $(nproc) --branch $KERNEL_BRANCH https://x-access-token:${{ secrets.GH_PAT }}@github.com/Nova-Kernels/priv_kernel_xiaomi_mt6785 $KERNEL_NAME
+          git clone --recursive --depth=1 -j $(nproc) --branch $KERNEL_BRANCH $KERNEL_REPO $KERNEL_NAME
           echo -e "\n⚠️ Kernel is at commit: $(git -C $KERNEL_NAME rev-parse HEAD)\n"
 
           echo "🤔 Clone kernel source => ($KERNEL_REPO)"
@@ -256,6 +255,20 @@ jobs:
           fi
 
           cat arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
+
+      - name: "🧩 Enable NoMount"
+        working-directory: ${{ env.KERNEL_NAME }}
+        env:
+          arch: ${{ steps.generate-args.outputs.ARCH }}
+        run: |
+          DEF=arch/${arch}/configs/${{ env.DEFCONFIG_NAME }}
+          if [ ! -d fs/nomount ] || [ ! -f fs/nomount/nomount.c ]; then
+            echo "::error::fs/nomount 缺失，submodule 未拉取"
+            exit 1
+          fi
+          sed -i 's/# CONFIG_NOMOUNT is not set/CONFIG_NOMOUNT=y/' "$DEF" || true
+          grep -q '^CONFIG_NOMOUNT=y' "$DEF" || echo 'CONFIG_NOMOUNT=y' >> "$DEF"
+          grep -n 'NOMOUNT' "$DEF"
 
       - name: "👍 Make defconfig"
         working-directory: ${{ env.KERNEL_NAME }}
