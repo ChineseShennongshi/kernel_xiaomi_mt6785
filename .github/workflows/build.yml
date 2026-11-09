@@ -212,19 +212,7 @@ jobs:
           arch: ${{ steps.generate-args.outputs.ARCH }}
         if: ${{ env.withKernelSU == 'true' }}
         run: |
-          if [ -d "./KernelSU" ]; then
-            rm -rf "./KernelSU"
-          fi
-          if [ -d "./KernelSU-Next" ]; then
-            rm -rf "./KernelSU-Next"
-          fi
-          if [ -d "./drivers/kernelsu" ]; then
-            rm -rf "./drivers/kernelsu"
-          fi
-
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-
-          rm -rf KernelSU
+          rm -rf ./KernelSU ./KernelSU-Next ./drivers/kernelsu
 
           if [ "$withSUSFS" = "true" ]; then
             git clone --recursive -j $(nproc) --branch legacy-susfs-v2 https://github.com/sidex15/KernelSU-Next KernelSU
@@ -232,19 +220,32 @@ jobs:
             git clone --recursive -j $(nproc) --branch legacy https://github.com/KernelSU-Next/KernelSU-Next KernelSU
           fi
 
-          KERNELSU_VERSION=$(git -C KernelSU describe --abbrev=0 --tags)
-
-          echo -e "\n💡 KernelSU version: $KERNELSU_VERSION\n"
-
-          echo -e "KERNELSU_VERSION=$KERNELSU_VERSION" >> $GITHUB_OUTPUT
-
-          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
-          sed -i 's/# CONFIG_KSU_MANUAL_HOOK is not set/CONFIG_KSU_MANUAL_HOOK=y/' arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
-          if [ "$withSUSFS" = "true" ]; then
-            sed -i 's/# CONFIG_KSU_SUSFS is not set/CONFIG_KSU_SUSFS=y/' arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
+          if [ ! -f "./KernelSU/kernel/Kconfig" ]; then
+            echo "::error::KernelSU 源码不完整，kernel/Kconfig 缺失"
+            exit 1
           fi
 
-          cat arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
+          KERNELSU_VERSION=$(git -C KernelSU describe --abbrev=0 --tags 2>/dev/null || echo unknown)
+          echo -e "\n💡 KernelSU version: $KERNELSU_VERSION\n"
+          echo -e "KERNELSU_VERSION=$KERNELSU_VERSION" >> $GITHUB_OUTPUT
+
+          # 手动集成：符号链接 + Kconfig/Makefile 挂载（不依赖 setup.sh 版本差异）
+          ln -sfn ../KernelSU/kernel drivers/kernelsu
+          grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || sed -i '$i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          grep -q 'kernelsu/' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+
+          echo "== 集成结果 =="
+          ls -l drivers/kernelsu/Kconfig drivers/kernelsu/Makefile
+          grep -n 'kernelsu' drivers/Kconfig drivers/Makefile
+
+          DEF=arch/${{ env.arch }}/configs/${{ env.DEFCONFIG_NAME }}
+          sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEF"
+          sed -i 's/^# CONFIG_KSU_MANUAL_HOOK is not set/CONFIG_KSU_MANUAL_HOOK=y/' "$DEF"
+          sed -i 's/^# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$DEF"
+          sed -i 's/^# CONFIG_KSU_KPROBES_HOOK is not set/CONFIG_KSU_KPROBES_HOOK=y/' "$DEF"
+          if [ "$withSUSFS" = "true" ]; then
+            sed -i 's/^# CONFIG_KSU_SUSFS is not set/CONFIG_KSU_SUSFS=y/' "$DEF"
+          fi
 
       - name: "🧩 Enable NoMount"
         working-directory: ${{ env.KERNEL_NAME }}
@@ -268,6 +269,24 @@ jobs:
         run: |
           echo "PATH Variable: $PATH"
           make ${{ env.args }} ${{ env.DEFCONFIG_NAME }}
+
+      - name: "🔍 Verify critical configs"
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          CFG="${{ env.OUT_DIR }}/.config"
+          [ -f "$CFG" ] || CFG=".config"
+          echo "配置文件: $CFG"
+          grep -E '^CONFIG_(KSU|KPROBES|NOMOUNT)' "$CFG" || echo "(无匹配)"
+          fail=0
+          for k in CONFIG_KSU CONFIG_NOMOUNT CONFIG_KPROBES; do
+            if grep -q "^$k=y" "$CFG"; then
+              echo "OK  $k=y"
+            else
+              echo "::error::$k 未启用"
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || exit 1
 
       - name: "🎶 Build kernel"
         working-directory: ${{ env.KERNEL_NAME }}
