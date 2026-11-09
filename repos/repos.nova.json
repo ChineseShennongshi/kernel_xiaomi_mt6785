@@ -5,17 +5,19 @@
       "device": "begonia",
       "defconfig": "begonia_user_defconfig",
       "name": "NoVa-kernel",
-      "repo": "https://github.com/Nova-Kernels/priv_kernel_xiaomi_mt6785",
+      "repo": "https://github.com/ChineseShennongshi/kernel_xiaomi_mt6785",
       "branch": "main"
     },
-    "withKernelSU": false,
-    "withSUSFS": false,
+    "withKernelSU": true,
+    "withSUSFS": true,
     "toolchains": [
       {
         "repo": "https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379",
         "branch": "15.0",
         "name": "clang-crDroid",
-        "binPath": ["./bin"]
+        "binPath": [
+          "./bin"
+        ]
       }
     ],
     "ccache": true,
